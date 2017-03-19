@@ -2,6 +2,7 @@ package radius
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/binary"
@@ -280,6 +281,7 @@ func (p *Packet) PAP() (username, password string, ok bool) {
 // packet, nil and an error is returned.
 func (p *Packet) Encode() ([]byte, error) {
 	var bufferAttrs bytes.Buffer
+	var msg_auth_attr_offset = -1
 	for _, attr := range p.Attributes {
 		codec := p.Dictionary.Codec(attr.Type)
 		wire, err := codec.Encode(p, attr.Value)
@@ -292,11 +294,30 @@ func (p *Packet) Encode() ([]byte, error) {
 		bufferAttrs.WriteByte(attr.Type)
 		bufferAttrs.WriteByte(byte(len(wire) + 2))
 		bufferAttrs.Write(wire)
+
+		// if this was the Message-Authenticator attribute then remember where its value appears in the buffer so we can update it when we are done assembling the attributes
+		if attr.Type == 80 && len(wire) == 16 { // checking for 16 is a sanity check
+			msg_auth_attr_offset = bufferAttrs.Len() - 16
+		}
 	}
 
 	length := 1 + 1 + 2 + 16 + bufferAttrs.Len()
 	if length > maxPacketSize {
 		return nil, errors.New("radius: encoded packet is too long")
+	}
+
+	attrBytes := bufferAttrs.Bytes()
+	if msg_auth_attr_offset > 0 {
+		// there is a Message-Authenticator attribute present. fill in the HMAC as defined by RFC 2869
+		msgAuth := attrBytes[msg_auth_attr_offset : msg_auth_attr_offset+16]
+		var nul [16]byte
+		copy(msgAuth, nul[:])
+		hash := hmac.New(md5.New, p.Secret)
+		hash.Write([]byte{byte(p.Code), p.Identifier})
+		binary.Write(hash, binary.BigEndian, uint16(length))
+		hash.Write(p.Authenticator[:])
+		hash.Write(attrBytes)
+		copy(msgAuth, hash.Sum(nil))
 	}
 
 	var buffer bytes.Buffer
@@ -318,7 +339,7 @@ func (p *Packet) Encode() ([]byte, error) {
 		} else {
 			hash.Write(p.Authenticator[:])
 		}
-		hash.Write(bufferAttrs.Bytes())
+		hash.Write(attrBytes)
 		hash.Write(p.Secret)
 
 		var sum [md5.Size]byte

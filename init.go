@@ -66,4 +66,15 @@ func init() {
 	Builtin.MustRegister("Acct-Terminate-Cause", 49, AttributeInteger)
 	Builtin.MustRegister("Acct-Multi-Session-Id", 50, AttributeText)
 	Builtin.MustRegister("Acct-Link-Count", 51, AttributeInteger)
+
+	// selected attributes from RFC 2868, sufficient to assign a VLAN
+	Builtin.MustRegister("Tunnel-Type", 64, AttributeInteger)
+	Builtin.MustRegister("Tunnel-Medium-Type", 65, AttributeInteger)
+	Builtin.MustRegister("Tunnel-Private-Group-Id", 81, AttributeString)
+
+	// selected attributes from RFC 2869, sufficient to send CoA/DM messages
+	Builtin.MustRegister("Event-Timestamp", 55, AttributeInteger)
+	Builtin.MustRegister("EAP-Message", 79, AttributeString)
+	Builtin.MustRegister("Message-Authenticator", 80, AttributeString)
+	Builtin.MustRegister("NAS-Port-Id", 87, AttributeText)
 }
