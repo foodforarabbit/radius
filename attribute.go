@@ -1,4 +1,4 @@
-package radius // import "layeh.com/radius"
+package radius
 
 // Attribute is a RADIUS attribute, which is part of a RADIUS packet.
 type Attribute struct {

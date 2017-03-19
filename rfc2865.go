@@ -1,4 +1,4 @@
-package radius // import "layeh.com/radius"
+package radius
 
 import (
 	"bytes"
