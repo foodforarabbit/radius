@@ -14,7 +14,7 @@ const maxPacketSize = 4095
 // Code specifies the kind of RADIUS packet.
 type Code byte
 
-// Codes which are defined in RFC 2865.
+// Codes which are defined in RFC 2865 and RFC 5176.
 const (
 	CodeAccessRequest      Code = 1
 	CodeAccessAccept       Code = 2
@@ -24,10 +24,12 @@ const (
 	CodeAccessChallenge    Code = 11
 	CodeStatusServer       Code = 12
 	CodeStatusClient       Code = 13
-	CodeDisconnectRequest  Code = 40
-	CodeDisconnectAck      Code = 41
-	CodeDisconnectNak      Code = 42
-	CodeReserved           Code = 255
+
+	CodeDisconnectRequest Code = 40
+	CodeDisconnectAck     Code = 41
+	CodeDisconnectNak     Code = 42
+
+	CodeReserved Code = 255
 )
 
 // Packet defines a RADIUS packet.
@@ -128,10 +130,12 @@ func Parse(data, secret []byte, dictionary *Dictionary) (*Packet, error) {
 //      CodeAccountingRequest
 //      CodeAccountingResponse
 //      CodeAccessChallenge
+//      CodeDisconnectRequest, Ack or Nak
 //  - p.Authenticator contains the calculated authenticator
 func (p *Packet) IsAuthentic(request *Packet) bool {
 	switch p.Code {
-	case CodeDisconnectRequest, CodeDisconnectAck, CodeAccessAccept, CodeAccessReject, CodeAccountingRequest, CodeAccessChallenge:
+	case CodeAccessAccept, CodeAccessReject, CodeAccountingRequest, CodeAccessChallenge,
+		CodeDisconnectRequest, CodeDisconnectAck, CodeDisconnectNak:
 		wire, err := p.Encode()
 		if err != nil {
 			return false
@@ -302,9 +306,10 @@ func (p *Packet) Encode() ([]byte, error) {
 	binary.Write(&buffer, binary.BigEndian, uint16(length))
 
 	switch p.Code {
-	case CodeDisconnectAck, CodeAccessRequest:
+	case CodeAccessRequest:
 		buffer.Write(p.Authenticator[:])
-	case CodeDisconnectRequest, CodeAccessAccept, CodeAccessReject, CodeAccountingRequest, CodeAccountingResponse, CodeAccessChallenge:
+	case CodeAccessAccept, CodeAccessReject, CodeAccountingRequest, CodeAccountingResponse, CodeAccessChallenge,
+		CodeDisconnectRequest, CodeDisconnectAck, CodeDisconnectNak:
 		hash := md5.New()
 		hash.Write(buffer.Bytes())
 		if p.Code == CodeAccountingRequest || p.Code == CodeDisconnectRequest {
@@ -318,7 +323,9 @@ func (p *Packet) Encode() ([]byte, error) {
 
 		var sum [md5.Size]byte
 		buffer.Write(hash.Sum(sum[0:0]))
-		if p.Code == CodeDisconnectRequest {
+
+		if p.Code == CodeAccountingRequest || p.Code == CodeDisconnectRequest {
+			// save the calculated authenticator for the caller to use in validating the response
 			copy(p.Authenticator[:], hash.Sum(sum[0:0]))
 		}
 	default:
