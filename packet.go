@@ -315,7 +315,12 @@ func (p *Packet) Encode() ([]byte, error) {
 		hash := hmac.New(md5.New, p.Secret)
 		hash.Write([]byte{byte(p.Code), p.Identifier})
 		binary.Write(hash, binary.BigEndian, uint16(length))
-		hash.Write(p.Authenticator[:])
+		if p.Code == CodeAccountingRequest || p.Code == CodeDisconnectRequest {
+			var nul [16]byte
+			hash.Write(nul[:])
+		} else {
+			hash.Write(p.Authenticator[:])
+		}
 		hash.Write(attrBytes)
 		copy(msgAuth, hash.Sum(nil))
 	}
