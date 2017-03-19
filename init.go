@@ -77,4 +77,7 @@ func init() {
 	Builtin.MustRegister("EAP-Message", 79, AttributeString)
 	Builtin.MustRegister("Message-Authenticator", 80, AttributeString)
 	Builtin.MustRegister("NAS-Port-Id", 87, AttributeText)
+
+	// selected attributes from RFC 3162
+	Builtin.MustRegister("NAS-IPv6-Address", 97, AttributeAddress6)
 }
