@@ -14,7 +14,7 @@ var (
 	AttributeText AttributeCodec
 	// []byte
 	AttributeString AttributeCodec
-	// net.IP
+	// net.IP as an IPv4 address
 	AttributeAddress AttributeCodec
 	// uint32
 	AttributeInteger AttributeCodec
@@ -22,6 +22,8 @@ var (
 	AttributeTime AttributeCodec
 	// []byte
 	AttributeUnknown AttributeCodec
+	// net.IP as an IPv6 address
+	AttributeAddress6 AttributeCodec
 )
 
 type attributeText struct{}
@@ -84,6 +86,29 @@ func (attributeAddress) Encode(packet *Packet, value interface{}) ([]byte, error
 	ip = ip.To4()
 	if ip == nil {
 		return nil, errors.New("radius: address attribute must be an IPv4 net.IP")
+	}
+	return []byte(ip), nil
+}
+
+type attributeAddress6 struct{}
+
+func (attributeAddress6) Decode(packet *Packet, value []byte) (interface{}, error) {
+	if len(value) != net.IPv6len {
+		return nil, errors.New("radius: address6 attribute has invalid size")
+	}
+	v := make([]byte, len(value))
+	copy(v, value)
+	return net.IP(v), nil
+}
+
+func (attributeAddress6) Encode(packet *Packet, value interface{}) ([]byte, error) {
+	ip, ok := value.(net.IP)
+	if !ok {
+		return nil, errors.New("radius: address attribute must be net.IP")
+	}
+	ip = ip.To16()
+	if ip == nil {
+		return nil, errors.New("radius: address attribute must be an IPv6 net.IP")
 	}
 	return []byte(ip), nil
 }
