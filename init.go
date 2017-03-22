@@ -80,4 +80,7 @@ func init() {
 
 	// selected attributes from RFC 3162
 	Builtin.MustRegister("NAS-IPv6-Address", 97, AttributeAddress6)
+
+	// selected attributes from RFC 3576
+	Builtin.MustRegister("Error-Cause", 101, AttributeInteger)
 }
