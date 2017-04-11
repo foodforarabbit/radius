@@ -50,9 +50,7 @@ func (attributeText) Encode(packet *Packet, value interface{}) ([]byte, error) {
 type attributeString struct{}
 
 func (attributeString) Decode(packet *Packet, value []byte) (interface{}, error) {
-	v := make([]byte, len(value))
-	copy(v, value)
-	return v, nil
+	return string(value), nil
 }
 
 func (attributeString) Encode(packet *Packet, value interface{}) ([]byte, error) {
