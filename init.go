@@ -74,6 +74,7 @@ func init() {
 
 	// selected attributes from RFC 2869, sufficient to send CoA/DM messages
 	Builtin.MustRegister("Event-Timestamp", 55, AttributeInteger)
+	Builtin.MustRegister("Connect-Info", 77, AttributeString)
 	Builtin.MustRegister("EAP-Message", 79, AttributeString)
 	Builtin.MustRegister("Message-Authenticator", 80, AttributeString)
 	Builtin.MustRegister("NAS-Port-Id", 87, AttributeText)
