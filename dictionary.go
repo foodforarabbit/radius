@@ -3,6 +3,14 @@ package radius
 import (
 	"errors"
 	"sync"
+	"fmt"
+	"os"
+	"bufio"
+	"strings"
+	"path/filepath"
+	"encoding/binary"
+	"bytes"
+	"strconv"
 )
 
 var builtinOnce sync.Once
@@ -13,7 +21,7 @@ var Builtin *Dictionary
 
 func initDictionary() {
 	Builtin = &Dictionary{}
-	Builtin.Vendor = "default"
+	Builtin.RegisterVendor("default",1)
 }
 
 type dictEntry struct {
@@ -32,11 +40,151 @@ type dictAttr struct {
 type Dictionary struct {
 	mu              	sync.RWMutex
 	Vendor						string
+	VendorId					map[string]int
 	values						map[string]*dictAttr
 }
 
+func (d *Dictionary) to_byte(bst string) byte {
+	i, _ := strconv.ParseInt(bst, 10, 8)
+	b_buf := bytes.NewBuffer([]byte{})
+	binary.Write(b_buf, binary.LittleEndian, i)
+	return b_buf.Bytes()[0]
+}
+
+func (d *Dictionary) ParseAttrs(arr []string) bool {
+	if len(arr) != 4 {
+		return false
+	}
+	if strings.ToUpper(arr[0]) == "ATTRIBUTE" {
+		num, _ := strconv.ParseInt(arr[2], 10, 32)
+		if num > 255 {
+			return false
+		}
+		switch arr[3] {
+			case "string":
+				d.MustRegister(arr[1], d.to_byte(arr[2]), AttributeString)
+			case "integer"
+				d.MustRegister(arr[1], d.to_byte(arr[2]), AttributeInteger)
+			case "ipaddr"
+				d.MustRegister(arr[1], d.to_byte(arr[2]), AttributeAddress)
+			case "octets"
+				d.MustRegister(arr[1], d.to_byte(arr[2]), AttributeString)
+			case "date"
+				d.MustRegister(arr[1], d.to_byte(arr[2]), AttributeTime)
+		}
+		return true
+	}
+	return false
+}
+
+func (d *Dictionary) ParseVendor(arr []string) bool {
+	if len(arr) != 3 {
+		return false
+	}
+
+	if strings.ToUpper(arr[0]) == "VENDOR" {
+		vid,_ := strconv.Atoi(arr[2])
+		if vid <= 0 {
+			panic("ParseVendor ID <= 0 ")
+			return false
+		}
+		d.RegisterVendor(arr[1],vid)
+		return true
+	}
+
+	return false
+}
+
+func (d *Dictionary) ParseBeginVendor(arr []string ) bool {
+	if len(arr) != 2 {
+		return false
+	}
+
+	if strings.ToUpper(arr[0]) == "BEGIN-VENDOR" {
+		d.SwitchVendor(arr[1])
+		return true
+	}
+
+	return false
+
+}
+
+func (d *Dictionary) ParseEndVendor(arr  []string ) bool {
+	if len(arr) != 2 {
+		return false
+	}
+	if strings.ToUpper(arr[0]) == "END-VENDOR" {
+
+		d.SwitchVendor("default")
+		return true
+	}
+
+	return false
+}
+
+func (d *Dictionary) LoadDicts(path string) {
+	dir, err := filepath.Abs(filepath.Dir(path))
+	if err == nil {
+		fmt.Println(dir)
+	}
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		fmt.Println(path , " not existed")
+		return
+	}
+	inFile, _ := os.Open(path)
+	defer inFile.Close()
+	scanner := bufio.NewScanner(inFile)
+//	scanner.Split(bufio.ScanLines)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		arr := strings.Fields(line)
+
+		if d.ParseAttrs(arr) != true {
+			if d.ParseVendor(arr) != true {
+				if d.ParseBeginVendor(arr) != true {
+					d.ParseEndVendor(arr)
+				}
+			}
+		}
+	}
+}
+
+
 func (d *Dictionary) Values() *dictAttr {
 	return d.values[d.Vendor]
+}
+
+func (d *Dictionary) GetVendorId(v string) int {
+	return d.VendorId[v]
+}
+
+func (d *Dictionary) SwitchVendor( v string) {
+	if d.VendorId[v] != 0 {
+		d.Vendor = v
+	}
+}
+
+func (d *Dictionary) RegisterVendor(v string, id int){
+	if id <= 0 {
+		panic("RegisterVendor ID must > 0")
+		return
+	}
+	if d.VendorId == nil {
+		d.VendorId = make(map[string]int)
+	}
+
+	if d.VendorId[v] == 0 {
+			d.Vendor = v
+			d.VendorId[v] = id
+			if d.values == nil {
+				d.values = make(map[string]*dictAttr)
+			}
+			if d.values[d.Vendor] ==  nil {
+				d.values[d.Vendor]  = &dictAttr{}
+			}
+	}
 }
 
 // Register registers the AttributeCodec for the given attribute name and type.
@@ -44,7 +192,12 @@ func (d *Dictionary) Register(name string, t byte, codec AttributeCodec) error {
 	d.mu.Lock()
 	if d.values == nil {
 		d.values = make(map[string]*dictAttr)
-		d.values[d.Vendor] = &dictAttr{}
+	}
+	if d.values[d.Vendor] ==  nil {
+		d.values[d.Vendor]  = &dictAttr{}
+	}
+	if d.VendorId == nil {
+		d.VendorId = make(map[string]int)
 	}
 	if d.Values().attributesByType[t] != nil {
 		d.mu.Unlock()
