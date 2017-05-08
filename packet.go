@@ -201,6 +201,12 @@ func (p *Packet) String(name string) string {
 	}
 	value := attr.Value
 
+	if codec := p.Dictionary.Codec(attr.Type); codec != nil {
+		if stringer, ok := codec.(AttributeStringer); ok {
+			return stringer.String(value)
+		}
+	}
+
 	if stringer, ok := value.(interface {
 		String() string
 	}); ok {
@@ -236,6 +242,15 @@ func (p *Packet) AddAttr(attribute *Attribute) {
 func (p *Packet) Set(name string, value interface{}) error {
 	for _, attr := range p.Attributes {
 		if attrName, ok := p.Dictionary.Name(attr.Type); ok && attrName == name {
+			codec := p.Dictionary.Codec(attr.Type)
+ 			if transformer, ok := codec.(AttributeTransformer); ok {
+ 				transformed, err := transformer.Transform(value)
+ 				if err != nil {
+ 					return err
+ 				}
+ 				attr.Value = transformed
+ 				return nil
+ 			}
 			attr.Value = value
 			return nil
 		}
@@ -258,9 +273,7 @@ func (p *Packet) PAP() (username, password string, ok bool) {
 	}
 	pass := p.Value("User-Password")
 	if pass == nil {
-		// Free RADIUS's radtest does not send a password attribute if
-		// it is the empty string.
-		pass = ""
+		return
 	}
 	if userStr, valid := user.(string); valid {
 		username = userStr
@@ -332,7 +345,7 @@ func (p *Packet) Encode() ([]byte, error) {
 	binary.Write(&buffer, binary.BigEndian, uint16(length))
 
 	switch p.Code {
-	case CodeAccessRequest:
+	case CodeAccessRequest, CodeStatusServer:
 		buffer.Write(p.Authenticator[:])
 	case CodeAccessAccept, CodeAccessReject, CodeAccountingRequest, CodeAccountingResponse, CodeAccessChallenge,
 		CodeDisconnectRequest, CodeDisconnectAck, CodeDisconnectNak:

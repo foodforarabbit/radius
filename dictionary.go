@@ -5,9 +5,15 @@ import (
 	"sync"
 )
 
+var builtinOnce sync.Once
+
 // Builtin is the built-in dictionary. It is initially loaded with the
 // attributes defined in RFC 2865 and RFC 2866.
 var Builtin *Dictionary
+
+func initDictionary() {
+	Builtin = &Dictionary{}
+}
 
 type dictEntry struct {
 	Type  byte
@@ -69,16 +75,22 @@ func (d *Dictionary) get(name string) (t byte, codec AttributeCodec, ok bool) {
 //
 // If name is not registered, nil and an error is returned.
 func (d *Dictionary) Attr(name string, value interface{}) (*Attribute, error) {
-	t, _, ok := d.get(name)
+	t, codec, ok := d.get(name)
 	if !ok {
 		return nil, errors.New("radius: attribute name not registered")
+	}
+	if transformer, ok := codec.(AttributeTransformer); ok {
+		transformed, err := transformer.Transform(value)
+		if err != nil {
+			return nil, err
+		}
+		value = transformed
 	}
 	return &Attribute{
 		Type:  t,
 		Value: value,
 	}, nil
 }
-
 // MustAttr is a helper for Attr that panics if Attr were to return an error.
 func (d *Dictionary) MustAttr(name string, value interface{}) *Attribute {
 	attr, err := d.Attr(name, value)

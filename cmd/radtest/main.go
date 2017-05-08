@@ -1,4 +1,4 @@
-package main // import "layeh.com/radius/cmd/radtest"
+package main // import "github.com/foodforarabbit/radius/cmd/radtest"
 
 import (
 	"flag"
@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"layeh.com/radius"
+	"github.com/foodforarabbit/radius"
 )
 
 const usage = `
