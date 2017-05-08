@@ -1,32 +1,34 @@
 package radius
 
 import (
+	"log"
 	"errors"
 	"net"
 	"sync"
+	"fmt"
 )
 
 // Handler is a value that can handle a server's RADIUS packet event.
 type Handler interface {
-	ServeRADIUS(w ResponseWriter, p *Packet)
+	ServeRadius(w ResponseWriter, p *Packet)
 }
 
 // HandlerFunc is a wrapper that allows ordinary functions to be used as a
 // handler.
 type HandlerFunc func(w ResponseWriter, p *Packet)
 
-// ServeRADIUS calls h(w, p).
-func (h HandlerFunc) ServeRADIUS(w ResponseWriter, p *Packet) {
+// ServeRadius calls h(w, p).
+func (h HandlerFunc) ServeRadius(w ResponseWriter, p *Packet) {
 	h(w, p)
 }
 
-var _ Handler = HandlerFunc(nil)
 
 // ResponseWriter is used by Handler when replying to a RADIUS packet.
 type ResponseWriter interface {
 	// LocalAddr returns the address of the local server that accepted the
 	// packet.
 	LocalAddr() net.Addr
+
 	// RemoteAddr returns the address of the remote client that sent to packet.
 	RemoteAddr() net.Addr
 
@@ -36,19 +38,23 @@ type ResponseWriter interface {
 	// AccessAccept sends an Access-Accept packet to the sender that includes
 	// the given attributes.
 	AccessAccept(attributes ...*Attribute) error
+
 	// AccessAccept sends an Access-Reject packet to the sender that includes
 	// the given attributes.
 	AccessReject(attributes ...*Attribute) error
+
 	// AccessAccept sends an Access-Challenge packet to the sender that includes
 	// the given attributes.
 	AccessChallenge(attributes ...*Attribute) error
+
+	AccountingResponse(attributes ...*Attribute) error
 }
 
 type responseWriter struct {
 	// listener that received the packet
-	conn net.PacketConn
+	conn *net.UDPConn
 	// where the packet came from
-	addr net.Addr
+	addr *net.UDPAddr
 	// original packet
 	packet *Packet
 }
@@ -91,12 +97,18 @@ func (r *responseWriter) AccessChallenge(attributes ...*Attribute) error {
 	return r.accessRespond(CodeAccessChallenge, attributes...)
 }
 
+func (r *responseWriter) AccountingResponse(attributes ...*Attribute) error {
+	// TOOD: do not send if packet was not Access-Request
+	return r.accessRespond(CodeAccountingResponse, attributes...)
+}
+
+
 func (r *responseWriter) Write(packet *Packet) error {
 	raw, err := packet.Encode()
 	if err != nil {
 		return err
 	}
-	if _, err := r.conn.WriteTo(raw, r.addr); err != nil {
+	if _, err := r.conn.WriteToUDP(raw, r.addr); err != nil {
 		return err
 	}
 	return nil
@@ -106,83 +118,81 @@ func (r *responseWriter) Write(packet *Packet) error {
 type Server struct {
 	// Address to bind the server on. If empty, the address defaults to ":1812".
 	Addr string
+
 	// Network of the server. Valid values are "udp", "udp4", "udp6". If empty,
 	// the network defaults to "udp".
 	Network string
+
 	// The shared secret between the client and server.
 	Secret []byte
 
-	// TODO: allow a secret function to be defined, which returned the secret
-	// that should be used for the given client.
+	// Client->Secret mapping
+	ClientsMap map[string]string
+	clientIP []string
+	ClientNets []net.IPNet
+	ClientSecrets []string
 
 	// Dictionary used when decoding incoming packets.
 	Dictionary *Dictionary
 
 	// The packet handler that handles incoming, valid packets.
 	Handler Handler
+
+	// Listener
+	listener *net.UDPConn
 }
 
-// Serve accepts incoming connections on the net.PacketConn pc.
-func (s *Server) Serve(pc net.PacketConn) error {
-	if s.Handler == nil {
-		return errors.New("radius: nil Handler")
-	}
+func (s *Server) ResetClientNets() error {
 
-	type activeKey struct {
-		IP         string
-		Identifier byte
-	}
+	s.ClientNets = nil
+	s.ClientSecrets = nil
 
-	var (
-		activeLock sync.Mutex
-		active     = map[activeKey]struct{}{}
-	)
+	if s.ClientsMap != nil {
+		for k, v := range s.ClientsMap {
 
-	for {
-		buff := make([]byte, 4096)
-		n, remoteAddr, err := pc.ReadFrom(buff)
-		if err != nil {
-			if err.(*net.OpError).Temporary() {
-				return err
+			_, subnet, err := net.ParseCIDR(k)
+			if err != nil {
+				return errors.New("Unable to parse CIDR or IP " + k)
 			}
-			continue
+
+			s.ClientNets = append(s.ClientNets, *subnet)
+			s.ClientSecrets = append(s.ClientSecrets, v)
 		}
-
-		packet, err := Parse(buff[:n], s.Secret, s.Dictionary)
-		if err != nil {
-			continue
-		}
-
-		go func(packet *Packet, remoteAddr net.Addr) {
-			key := activeKey{
-				IP:         remoteAddr.String(),
-				Identifier: packet.Identifier,
-			}
-			activeLock.Lock()
-			if _, ok := active[key]; ok {
-				activeLock.Unlock()
-				return
-			}
-			active[key] = struct{}{}
-			activeLock.Unlock()
-
-			response := responseWriter{
-				conn:   pc,
-				addr:   remoteAddr,
-				packet: packet,
-			}
-
-			s.Handler.ServeRADIUS(&response, packet)
-
-			activeLock.Lock()
-			delete(active, key)
-			activeLock.Unlock()
-		}(packet, remoteAddr)
 	}
+
+	return nil
 }
+
+
+func (s *Server) CheckClientsMap() error {
+
+	if s.ClientsMap != nil {
+		for k, _ := range s.ClientsMap {
+			ip := net.ParseIP(k)
+			if ip == nil {
+				return errors.New("Not legal Clients IP address")
+			}
+		}
+	}
+
+	return nil
+}
+
+func (s *Server) AddClientsMap(m map[string]string ) {
+	if s.ClientsMap == nil  && len(m) > 0 {
+		s.ClientsMap = m
+	//	s.ResetClientNets()
+	}
+
+}
+
 
 // ListenAndServe starts a RADIUS server on the address given in s.
 func (s *Server) ListenAndServe() error {
+	if s.listener != nil {
+		return errors.New("radius: server already started")
+	}
+
 	if s.Handler == nil {
 		return errors.New("radius: nil Handler")
 	}
@@ -197,10 +207,123 @@ func (s *Server) ListenAndServe() error {
 		network = s.Network
 	}
 
-	pc, err := net.ListenPacket(network, addrStr)
+	addr, err := net.ResolveUDPAddr(network, addrStr)
 	if err != nil {
 		return err
 	}
-	defer pc.Close()
-	return s.Serve(pc)
+	s.listener, err = net.ListenUDP(network, addr)
+	if err != nil {
+		return err
+	}
+
+	if s.ClientsMap != nil {
+		// double check, either IP or IPNet range
+		err =  s.ResetClientNets()
+		if err != nil {
+			err = s.CheckClientsMap()
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	type activeKey struct {
+		IP         string
+		Identifier byte
+	}
+
+	var (
+		activeLock sync.Mutex
+		active     = map[activeKey]bool{}
+	)
+
+	for {
+		buff := make([]byte, 4096)
+		n, remoteAddr, err := s.listener.ReadFromUDP(buff)
+		if err != nil && !err.(*net.OpError).Temporary() {
+			break
+		}
+
+		if n == 0 {
+			continue
+		}
+
+		buff = buff[:n]
+		go func(conn *net.UDPConn, buff []byte, remoteAddr *net.UDPAddr) {
+			secret := s.Secret
+
+			log.Println("Remote IP: ",remoteAddr.IP)
+
+
+			legal := false
+
+
+			if s.ClientsMap[ fmt.Sprintf("%v",remoteAddr.IP)] != "" {
+				legal = true
+				secret = []byte( s.ClientsMap[ fmt.Sprintf("%v",remoteAddr.IP) ] )
+			}else {
+
+				log.Println( s.ClientsMap ,fmt.Sprintf("%v",remoteAddr.IP))
+				//conn.Close()
+
+			}
+
+			if legal == false {
+				log.Println(remoteAddr.IP," inlegal")
+				return
+			}
+
+			if s.ClientNets != nil {
+			    log.Println(remoteAddr.IP)
+			    for k, v := range s.ClientNets {
+				if v.Contains(remoteAddr.IP) {
+				    log.Println(remoteAddr.IP)
+				    secret = []byte(s.ClientSecrets[k])
+				}
+			    }
+			}
+
+			packet, err := Parse(buff, secret, s.Dictionary)
+			if err != nil {
+				return
+			}
+
+			key := activeKey{
+				IP:         remoteAddr.String(),
+				Identifier: packet.Identifier,
+			}
+
+			activeLock.Lock()
+			if _, ok := active[key]; ok {
+				activeLock.Unlock()
+				return
+			}
+			active[key] = true
+			activeLock.Unlock()
+
+			response := responseWriter{
+				conn:   conn,
+				addr:   remoteAddr,
+				packet: packet,
+			}
+
+			s.Handler.ServeRadius(&response, packet)
+
+			activeLock.Lock()
+			delete(active, key)
+			activeLock.Unlock()
+		}(s.listener, buff, remoteAddr)
+	}
+	// TODO: only return nil if s.Close was called
+	s.listener = nil
+	return nil
+}
+
+// Close stops listening for packets. Any packet that is currently being
+// handled will not be able to respond to the sender.
+func (s *Server) Close() error {
+	if s.listener == nil {
+		return nil
+	}
+	return s.listener.Close()
 }

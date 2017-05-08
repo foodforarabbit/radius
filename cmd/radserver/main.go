@@ -110,6 +110,9 @@ func main() {
 		Handler:    radius.HandlerFunc(handler),
 		Secret:     []byte(*secret),
 		Dictionary: radius.Builtin,
+		ClientsMap: map[string]string{
+			"127.0.0.1": "bbb",
+		},
 	}
 
 	if err := server.ListenAndServe(); err != nil {
