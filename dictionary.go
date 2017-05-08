@@ -63,13 +63,13 @@ func (d *Dictionary) ParseAttrs(arr []string) bool {
 		switch arr[3] {
 			case "string":
 				d.MustRegister(arr[1], d.to_byte(arr[2]), AttributeString)
-			case "integer"
+			case "integer":
 				d.MustRegister(arr[1], d.to_byte(arr[2]), AttributeInteger)
-			case "ipaddr"
+			case "ipaddr":
 				d.MustRegister(arr[1], d.to_byte(arr[2]), AttributeAddress)
-			case "octets"
+			case "octets":
 				d.MustRegister(arr[1], d.to_byte(arr[2]), AttributeString)
-			case "date"
+			case "date":
 				d.MustRegister(arr[1], d.to_byte(arr[2]), AttributeTime)
 		}
 		return true
