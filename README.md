@@ -4,7 +4,7 @@ a Go (golang) [RADIUS](https://tools.ietf.org/html/rfc2865) client and server im
 
 ## Installation
 
-    go get -u layeh.com/radius
+    go get -u github.com/foodforarabbit/radius
 
 ## License
 
