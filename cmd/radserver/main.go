@@ -1,4 +1,4 @@
-package main // import "github.com/foodforarabbit/radius/cmd/radtest"
+package main // import "github.com/foodforarabbit/radius/cmd/radserver"
 
 import (
 	"flag"

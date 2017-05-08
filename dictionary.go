@@ -13,6 +13,7 @@ var Builtin *Dictionary
 
 func initDictionary() {
 	Builtin = &Dictionary{}
+	Builtin.Vendor = "default"
 }
 
 type dictEntry struct {
@@ -21,18 +22,31 @@ type dictEntry struct {
 	Codec AttributeCodec
 }
 
+type dictAttr struct {
+	attributesByType [1069]*dictEntry
+	attributesByName map[string]*dictEntry
+}
+
 // Dictionary stores mappings between attribute names and types and
 // AttributeCodecs.
 type Dictionary struct {
-	mu               sync.RWMutex
-	attributesByType [256]*dictEntry
-	attributesByName map[string]*dictEntry
+	mu              	sync.RWMutex
+	Vendor						string
+	values						map[string]*dictAttr
+}
+
+func (d *Dictionary) Values() *dictAttr {
+	return d.values[d.Vendor]
 }
 
 // Register registers the AttributeCodec for the given attribute name and type.
 func (d *Dictionary) Register(name string, t byte, codec AttributeCodec) error {
 	d.mu.Lock()
-	if d.attributesByType[t] != nil {
+	if d.values == nil {
+		d.values = make(map[string]*dictAttr)
+		d.values[d.Vendor] = &dictAttr{}
+	}
+	if d.Values().attributesByType[t] != nil {
 		d.mu.Unlock()
 		return errors.New("radius: attribute already registered")
 	}
@@ -41,11 +55,11 @@ func (d *Dictionary) Register(name string, t byte, codec AttributeCodec) error {
 		Name:  name,
 		Codec: codec,
 	}
-	d.attributesByType[t] = entry
-	if d.attributesByName == nil {
-		d.attributesByName = make(map[string]*dictEntry)
+	d.Values().attributesByType[t] = entry
+	if d.Values().attributesByName == nil {
+		d.Values().attributesByName = make(map[string]*dictEntry)
 	}
-	d.attributesByName[name] = entry
+	d.Values().attributesByName[name] = entry
 	d.mu.Unlock()
 	return nil
 }
@@ -59,7 +73,7 @@ func (d *Dictionary) MustRegister(name string, t byte, codec AttributeCodec) {
 
 func (d *Dictionary) get(name string) (t byte, codec AttributeCodec, ok bool) {
 	d.mu.RLock()
-	entry := d.attributesByName[name]
+	entry := d.Values().attributesByName[name]
 	d.mu.RUnlock()
 	if entry == nil {
 		return
@@ -104,7 +118,7 @@ func (d *Dictionary) MustAttr(name string, value interface{}) *Attribute {
 // if the given type is not registered.
 func (d *Dictionary) Name(t byte) (name string, ok bool) {
 	d.mu.RLock()
-	entry := d.attributesByType[t]
+	entry := d.Values().attributesByType[t]
 	d.mu.RUnlock()
 	if entry == nil {
 		return
@@ -118,7 +132,7 @@ func (d *Dictionary) Name(t byte) (name string, ok bool) {
 // if the given name is not registered.
 func (d *Dictionary) Type(name string) (t byte, ok bool) {
 	d.mu.RLock()
-	entry := d.attributesByName[name]
+	entry := d.Values().attributesByName[name]
 	d.mu.RUnlock()
 	if entry == nil {
 		return
@@ -132,7 +146,7 @@ func (d *Dictionary) Type(name string) (t byte, ok bool) {
 // returned if the given type is not registered.
 func (d *Dictionary) Codec(t byte) AttributeCodec {
 	d.mu.RLock()
-	entry := d.attributesByType[t]
+	entry := d.Values().attributesByType[t]
 	d.mu.RUnlock()
 	if entry == nil {
 		return AttributeUnknown
