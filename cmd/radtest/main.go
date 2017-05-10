@@ -35,11 +35,18 @@ func main() {
 	}
 	hostport := net.JoinHostPort(host, port)
 
+	radius.Builtin.LoadDicts("paloalto.dictionary")
 	packet := radius.New(radius.CodeAccessRequest, []byte(flag.Arg(4)))
 	packet.Add("User-Name", flag.Arg(0))
 	packet.Add("User-Password", flag.Arg(1))
 	nasPort, _ := strconv.Atoi(flag.Arg(3))
 	packet.Add("NAS-Port", uint32(nasPort))
+	packet.Add("PaloAlto-Admin-Role", "admin")
+	packet.Add("PaloAlto-Client-Source-IP", "127.0.0.1")
+
+	for _, attr := range packet.SubAttributes {
+		fmt.Println(attr.Value)
+	}
 
 	client := radius.Client{
 		DialTimeout: *timeout,

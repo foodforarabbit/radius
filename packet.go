@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"fmt"
 )
 
 // maximum RADIUS packet size
@@ -44,6 +45,9 @@ type Packet struct {
 	Dictionary *Dictionary
 
 	Attributes []*Attribute
+
+	VendorId  uint32
+	SubAttributes []*Attribute
 }
 
 // New returns a new packet with the given code and secret. The identifier and
@@ -114,7 +118,7 @@ func Parse(data, secret []byte, dictionary *Dictionary) (*Packet, error) {
 			Type:  attrType,
 			Value: decoded,
 		}
-		packet.Attributes = append(packet.Attributes, attr)
+		packet.AddAttr(attr)
 		attributes = attributes[attrLength:]
 	}
 
@@ -162,6 +166,8 @@ func (p *Packet) IsAuthentic(request *Packet) bool {
 // ClearAttributes removes all of the packet's attributes.
 func (p *Packet) ClearAttributes() {
 	p.Attributes = nil
+	p.SubAttributes = nil
+	p.VendorId = 0
 }
 
 // Value returns the value of the first attribute whose dictionary name matches
@@ -177,7 +183,12 @@ func (p *Packet) Value(name string) interface{} {
 // name. nil is returned if no such attribute exists.
 func (p *Packet) Attr(name string) *Attribute {
 	for _, attr := range p.Attributes {
-		if attrName, ok := p.Dictionary.Name(attr.Type); ok && attrName == name {
+		if attrName, ok := p.Dictionary.Name(attr.Type, 0); ok && attrName == name {
+			return attr
+		}
+	}
+	for _, attr := range p.SubAttributes {
+		if attrName, ok := p.Dictionary.Name(attr.Type, p.VendorId); ok && attrName == name {
 			return attr
 		}
 	}
@@ -228,34 +239,67 @@ func (p *Packet) Add(name string, value interface{}) error {
 	if err != nil {
 		return err
 	}
-	p.AddAttr(attr)
+	return p.AddAttr(attr)
+}
+
+func (p *Packet) AddVSAAttr(attribute *Attribute) error {
+	if vsa, ok := attribute.Value.(VendorSpecific); ok {
+		vendor_id := vsa.VendorID
+		vsa_data := vsa.Data
+
+		// reset subattributes
+		p.SubAttributes = nil
+		p.VendorId = 0
+
+		for _, attr := range p.Dictionary.SubAttributeDecode(vendor_id, vsa_data) {
+			err := p.AddAttr(attr)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
 // AddAttr adds the given attribute to the packet.
-func (p *Packet) AddAttr(attribute *Attribute) {
-	p.Attributes = append(p.Attributes, attribute)
+func (p *Packet) AddAttr(attribute *Attribute) error {
+	// when adding vsa attribute, instead add subattributes
+	if attribute.Type == 26 {
+		return p.AddVSAAttr(attribute)
+	}
+
+	//when adding subattributes
+	if attribute.VendorId > 0 {
+		if p.VendorId == 0 || p.VendorId == attribute.VendorId {
+			// placeholder vsa attribute to trigger subattribute parsing on encode
+			if p.VendorId == 0 {
+				p.Attributes = append(p.Attributes, &Attribute{
+					Type: 26,
+				})
+			}
+			p.SubAttributes = append(p.SubAttributes, attribute)
+			p.VendorId = attribute.VendorId
+		} else {
+			return errors.New(fmt.Sprintf("radius: can't add vsa vendor id mismatch %v %v", p.VendorId, attribute.VendorId))
+		}
+	} else {
+		p.Attributes = append(p.Attributes, attribute)
+	}
+	return nil
 }
 
 // Set sets the value of the first attribute whose dictionary name matches the
 // given name. If no such attribute exists, a new attribute is added
 func (p *Packet) Set(name string, value interface{}) error {
-	for _, attr := range p.Attributes {
-		if attrName, ok := p.Dictionary.Name(attr.Type); ok && attrName == name {
-			codec := p.Dictionary.Codec(attr.Type)
- 			if transformer, ok := codec.(AttributeTransformer); ok {
- 				transformed, err := transformer.Transform(value)
- 				if err != nil {
- 					return err
- 				}
- 				attr.Value = transformed
- 				return nil
- 			}
-			attr.Value = value
-			return nil
-		}
+	attr := p.Attr(name)
+	if attr == nil || attr.Type == 26 {
+		return p.Add(name, value)
 	}
-	return p.Add(name, value)
+	_attr, err := p.Dictionary.Attr(name, value)
+	if err == nil {
+		attr.Value = _attr.Value
+	}
+	return err
 }
 
 // PAP returns the User-Name and User-Password attributes of an Access-Request
@@ -297,7 +341,21 @@ func (p *Packet) Encode() ([]byte, error) {
 	var msg_auth_attr_offset = -1
 	for _, attr := range p.Attributes {
 		codec := p.Dictionary.Codec(attr.Type)
-		wire, err := codec.Encode(p, attr.Value)
+		value := attr.Value
+
+		// allows setting VSA directly, or use p.SubAttributes (must have placeholder VSA attribute - can't use both)
+		if attr.Type == 26 && len(p.SubAttributes) > 0 {
+			vendor_id, data, err := p.Dictionary.SubAttributeEncode(p.SubAttributes, p.VendorId)
+			if err != nil {
+				return nil, errors.New("radius: sub attribute encoding error")
+			}
+
+			value = VendorSpecific {
+				VendorID: vendor_id,
+				Data: data,
+			}
+		}
+		wire, err := codec.Encode(p, value)
 		if err != nil {
 			return nil, err
 		}

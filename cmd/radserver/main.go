@@ -17,6 +17,7 @@ var command string
 var arguments []string
 
 func handler(w radius.ResponseWriter, p *radius.Packet) {
+
 	username, password, ok := p.PAP()
 	if !ok {
 		w.AccessReject()
@@ -32,6 +33,7 @@ func handler(w radius.ResponseWriter, p *radius.Packet) {
 		if !ok {
 			continue
 		}
+		log.Println(name, attr.Value)
 		name = strings.Map(func(r rune) rune {
 			if unicode.IsDigit(r) {
 				return r
@@ -46,6 +48,31 @@ func handler(w radius.ResponseWriter, p *radius.Packet) {
 		}, name)
 		value := fmt.Sprint(attr.Value)
 		cmd.Env = append(cmd.Env, "RADIUS_"+name+"="+value)
+	}
+	if p.VendorId > 0 {
+		log.Printf("===[ vsa %v ]==", p.VendorId)
+	}
+	for _, attr := range p.SubAttributes {
+		name, ok := p.Dictionary.Name(attr.Type, attr.VendorId)
+		if !ok {
+			continue
+		}
+		log.Println(name, attr.Value)
+		name = strings.Map(func(r rune) rune {
+			if unicode.IsDigit(r) {
+				return r
+			}
+			if unicode.IsLetter(r) {
+				if unicode.IsUpper(r) {
+					return r
+				}
+				return unicode.ToUpper(r)
+			}
+			return '_'
+		}, name)
+		value := fmt.Sprint(attr.Value)
+		cmd.Env = append(cmd.Env, "RADIUS_"+name+"="+value)
+		// _ = "RADIUS_"+name+"="+value
 	}
 
 	cmd.Env = append(cmd.Env, "RADIUS_USERNAME="+username, "RADIUS_PASSWORD="+password)
@@ -105,13 +132,18 @@ func main() {
 	arguments = flag.Args()[1:]
 
 	log.Println("radserver starting")
-
+	loadError := radius.Builtin.LoadDicts("paloalto.dictionary")
+	if loadError != nil {
+		log.Println("error loading paloalto dictionary", loadError)
+	} else {
+		log.Println("paloalto dictionary loaded")
+	}
 	server := radius.Server{
 		Handler:    radius.HandlerFunc(handler),
 		Secret:     []byte(*secret),
 		Dictionary: radius.Builtin,
 		ClientsMap: map[string]string{
-			"127.0.0.1": "bbb",
+			"127.0.0.1": "abc",
 		},
 	}
 

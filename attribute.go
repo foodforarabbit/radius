@@ -4,6 +4,7 @@ package radius
 type Attribute struct {
 	Type  byte
 	Value interface{}
+	VendorId uint32
 }
 
 // AttributeCodec defines how an Attribute is encoded and decoded to and from

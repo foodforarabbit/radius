@@ -1,0 +1,60 @@
+# -*- text -*-
+#
+#
+#  dictionary.paloalto
+#
+#
+VENDOR          PaloAlto                        25461
+
+BEGIN-VENDOR    PaloAlto
+
+ATTRIBUTE       PaloAlto-Admin-Role                         1   string
+# PaloAlto-Admin-Role is the name of the role for the user
+# it can be the name of a custom Admin role profile configured on the
+# PAN device or one of the following predefined roles
+# superuser : Superuser
+# superreader : Superuser (read-only)
+# deviceadmin : Device administrator
+# devicereader : Device administrator (read-only)
+# vsysadmin : Virtual system administrator
+# vsysreader : Virtual system administrator (read-only)
+
+ATTRIBUTE       PaloAlto-Admin-Access-Domain            2       string
+# PaloAlto-Admin-Access-Domain is the name of the access domain object defined
+# on the PAN device
+
+ATTRIBUTE       PaloAlto-Panorama-Admin-Role            3       string
+# PaloAlto-Panorama-Admin-Role is the name of the role for the user
+# it can be the name of a custom Admin role profile configured on the
+# Panorama server or one of the following predefined roles
+# superuser : Superuser
+# superreader : Superuser (read-only)
+# panorama-admin : Panorama administrator
+
+ATTRIBUTE       PaloAlto-Panorama-Admin-Access-Domain   4       string
+# PaloAlto-Panorama-Admin-Access-Domain is the name of the access domain
+# object defined on the Panorama server
+
+ATTRIBUTE       PaloAlto-User-Group         5   string
+# PaloAlto-User-Group is the name of the group of users
+
+ATTRIBUTE       PaloAlto-User-Domain        6   string
+# PaloAlto-User-Domain is the name of the user domain
+
+ATTRIBUTE       PaloAlto-Client-Source-IP   7       string
+# PaloAlto-Client-Source-IP is the source IP address of the computer
+# on which GlobalProtect client is used to log in
+
+ATTRIBUTE       PaloAlto-Client-OS   8       string
+# PaloAlto-Client-OS is the operating system (OS) of the computer
+# on which GlobalProtect client is used to log in
+
+ATTRIBUTE       PaloAlto-Client-Hostname   9       string
+# PaloAlto-Client-Hostname is the hostname of the computer
+# on which the user logs in
+
+ATTRIBUTE       PaloAlto-GlobalProtect-Client-Version  10       string
+# PaloAlto-GlobalProtect-Client-Version is the version of GlobalProtect
+# client which is used to log in
+
+END-VENDOR PaloAlto

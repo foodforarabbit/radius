@@ -3,6 +3,8 @@ package radius
 import (
 	"bytes"
 	"crypto/md5"
+
+	"encoding/binary"
 	"errors"
 	//"fmt"
 )
@@ -33,7 +35,7 @@ func init() {
 	Builtin.MustRegister("Framed-IPX-Network", 23, AttributeAddress)
 	Builtin.MustRegister("State", 24, AttributeString)
 	Builtin.MustRegister("Class", 25, AttributeString)
-	Builtin.MustRegister("Vendor-Specific", 26, AttributeString)
+	Builtin.MustRegister("Vendor-Specific", 26, rfc2865VendorSpecific{})
 	Builtin.MustRegister("Session-Timeout", 27, AttributeInteger)
 	Builtin.MustRegister("Idle-Timeout", 28, AttributeInteger)
 	Builtin.MustRegister("Termination-Action", 29, AttributeInteger)
@@ -127,4 +129,34 @@ func (rfc2865UserPassword) Encode(p *Packet, value interface{}) ([]byte, error) 
 	}
 
 	return mask[:], nil
+}
+
+// VendorSpecific defines RFC 2865's Vendor-Specific attribute.
+type VendorSpecific struct {
+	VendorID uint32
+	Data     []byte
+}
+
+type rfc2865VendorSpecific struct{}
+
+func (rfc2865VendorSpecific) Decode(p *Packet, value []byte) (interface{}, error) {
+	if len(value) < 5 {
+		return nil, errors.New("radius: Vendor-Specific attribute too small")
+	}
+	var attr VendorSpecific
+	attr.VendorID = binary.BigEndian.Uint32(value[:4])
+	attr.Data = make([]byte, len(value)-4)
+	copy(attr.Data, value[4:])
+	return attr, nil
+}
+
+func (rfc2865VendorSpecific) Encode(p *Packet, value interface{}) ([]byte, error) {
+	attr, ok := value.(VendorSpecific)
+	if !ok {
+		return nil, errors.New("radius: Vendor-Specific attribute is not type VendorSpecific")
+	}
+	b := make([]byte, 4+len(attr.Data))
+	binary.BigEndian.PutUint32(b[:4], attr.VendorID)
+	copy(b[4:], attr.Data)
+	return b, nil
 }
