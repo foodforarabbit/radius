@@ -140,6 +140,9 @@ type Server struct {
 
 	// Listener
 	listener *net.UDPConn
+
+	// quit channel
+	CloseChan chan bool
 }
 
 func (s *Server) ResetClientNets() error {
@@ -197,6 +200,10 @@ func (s *Server) ListenAndServe() error {
 		return errors.New("radius: nil Handler")
 	}
 
+	if s.CloseChan == nil {
+		s.CloseChan = make(chan bool)
+	}
+
 	addrStr := ":1812"
 	if s.Addr != "" {
 		addrStr = s.Addr
@@ -238,92 +245,96 @@ func (s *Server) ListenAndServe() error {
 	)
 
 	for {
-		buff := make([]byte, 4096)
-		n, remoteAddr, err := s.listener.ReadFromUDP(buff)
-		if err != nil && !err.(*net.OpError).Temporary() {
-			break
-		}
-
-		if n == 0 {
-			continue
-		}
-
-		buff = buff[:n]
-		go func(conn *net.UDPConn, buff []byte, remoteAddr *net.UDPAddr) {
-			secret := s.Secret
-
-			log.Println("Remote IP: ",remoteAddr.IP)
-
-
-			legal := false
-
-
-			if s.ClientsMap[ fmt.Sprintf("%v",remoteAddr.IP)] != "" {
-				legal = true
-				secret = []byte( s.ClientsMap[ fmt.Sprintf("%v",remoteAddr.IP) ] )
-			}else {
-
-				log.Println( s.ClientsMap ,fmt.Sprintf("%v",remoteAddr.IP))
-				//conn.Close()
-
+		select {
+		case <- s.CloseChan:
+			return nil
+		default:
+			buff := make([]byte, 4096)
+			n, remoteAddr, err := s.listener.ReadFromUDP(buff)
+			if err != nil && !err.(*net.OpError).Temporary() {
+				break
 			}
 
-			if legal == false {
-				log.Println(remoteAddr.IP," inlegal")
-				return
+			if n == 0 {
+				continue
 			}
 
-			if s.ClientNets != nil {
+			buff = buff[:n]
+			go func(conn *net.UDPConn, buff []byte, remoteAddr *net.UDPAddr) {
+				secret := s.Secret
+
+				log.Println("Remote IP: ",remoteAddr.IP)
+				legal := false
+
+				if s.ClientsMap[ fmt.Sprintf("%v",remoteAddr.IP)] != "" {
+					legal = true
+					secret = []byte( s.ClientsMap[ fmt.Sprintf("%v",remoteAddr.IP) ] )
+				} else {
+					log.Println( s.ClientsMap ,fmt.Sprintf("%v",remoteAddr.IP))
+					defer conn.Close()
+				}
+
+				if legal == false {
+					log.Println(remoteAddr.IP," not in clients map")
+					return
+				}
+
+				if s.ClientNets != nil {
 			    log.Println(remoteAddr.IP)
 			    for k, v := range s.ClientNets {
-				if v.Contains(remoteAddr.IP) {
-				    log.Println(remoteAddr.IP)
-				    secret = []byte(s.ClientSecrets[k])
-				}
+						if v.Contains(remoteAddr.IP) {
+						    log.Println(remoteAddr.IP)
+						    secret = []byte(s.ClientSecrets[k])
+						}
 			    }
-			}
+				}
 
-			packet, err := Parse(buff, secret, s.Dictionary)
-			if err != nil {
-				return
-			}
+				packet, err := Parse(buff, secret, s.Dictionary)
+				if err != nil {
+					return
+				}
 
-			key := activeKey{
-				IP:         remoteAddr.String(),
-				Identifier: packet.Identifier,
-			}
+				key := activeKey{
+					IP:         remoteAddr.String(),
+					Identifier: packet.Identifier,
+				}
 
-			activeLock.Lock()
-			if _, ok := active[key]; ok {
+				activeLock.Lock()
+				if _, ok := active[key]; ok {
+					activeLock.Unlock()
+					return
+				}
+				active[key] = true
 				activeLock.Unlock()
-				return
-			}
-			active[key] = true
-			activeLock.Unlock()
 
-			response := responseWriter{
-				conn:   conn,
-				addr:   remoteAddr,
-				packet: packet,
-			}
+				response := responseWriter{
+					conn:   conn,
+					addr:   remoteAddr,
+					packet: packet,
+				}
 
-			s.Handler.ServeRadius(&response, packet)
+				s.Handler.ServeRadius(&response, packet)
 
-			activeLock.Lock()
-			delete(active, key)
-			activeLock.Unlock()
-		}(s.listener, buff, remoteAddr)
+				activeLock.Lock()
+				delete(active, key)
+				activeLock.Unlock()
+			}(s.listener, buff, remoteAddr)
+		}
 	}
-	// TODO: only return nil if s.Close was called
-	s.listener = nil
-	return nil
+	return errors.New("server has stopped working unexpectedly")
 }
 
 // Close stops listening for packets. Any packet that is currently being
 // handled will not be able to respond to the sender.
 func (s *Server) Close() error {
+	if s.CloseChan != nil {
+		s.CloseChan <- true
+	}
 	if s.listener == nil {
 		return nil
 	}
+	defer func() {
+		s.listener = nil
+	}()
 	return s.listener.Close()
 }
