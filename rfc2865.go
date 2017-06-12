@@ -6,8 +6,6 @@ import (
 
 	"encoding/binary"
 	"errors"
-	"math"
-	"fmt"
 )
 
 func init() {
@@ -128,7 +126,7 @@ func (rfc2865UserPassword) Encode(p *Packet, value interface{}) ([]byte, error) 
 		return nil, errors.New("radius: User-Password longer than 128 characters")
 	}
 
-	chunks := int(math.Ceil(float64(len(password)) / 16.))
+	chunks := (len(password) + 15) >> 4
 	if chunks == 0 {
 		chunks = 1
 	}
@@ -161,8 +159,6 @@ func (rfc2865UserPassword) Encode(p *Packet, value interface{}) ([]byte, error) 
 			enc[i+j] ^= b
 		}
 	}
-
-	fmt.Println("password", enc)
 
 	return enc, nil
 }
