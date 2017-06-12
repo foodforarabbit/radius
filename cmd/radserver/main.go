@@ -16,6 +16,10 @@ var secret = flag.String("secret", "", "shared RADIUS secret between clients and
 var command string
 var arguments []string
 
+func error_handler(e error, p *radius.Packet) {
+	log.Printf("radserver err: %v", e)
+}
+
 func handler(w radius.ResponseWriter, p *radius.Packet) {
 
 	username, password, ok := p.PAP()
@@ -140,10 +144,11 @@ func main() {
 	}
 	server := radius.Server{
 		Handler:    radius.HandlerFunc(handler),
+		ErrorHandler:    radius.ErrorFunc(error_handler),
 		Secret:     []byte(*secret),
 		Dictionary: radius.Builtin,
 		ClientsMap: map[string]string{
-			"127.0.0.1": "abc",
+			"127.0.0.51/24": "abc",
 		},
 	}
 
